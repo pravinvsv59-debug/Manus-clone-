@@ -1,0 +1,8 @@
+{
+  "name": "Manus App Clone",
+  "description": "A high-fidelity recreation of the Manus application dashboard featuring category tabs, project lists, and a dark-themed UI.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
