@@ -1,8 +1,9 @@
 {
-  "name": "Manus App Clone",
-  "description": "A high-fidelity recreation of the Manus application dashboard featuring category tabs, project lists, and a dark-themed UI.",
+  "name": "Manus Mobile AI",
+  "description": "Premium native-feel mobile interface for autonomous agents.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

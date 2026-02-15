@@ -1,22 +1,113 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Manus App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            background-color: #121212;
-            color: white;
-            -webkit-tap-highlight-color: transparent;
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              manus: ['"Playfair Display"', 'serif'],
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              brand: {
+                blue: '#2563EB',
+                bg: '#0A0A0A',
+                card: '#141414',
+                border: 'rgba(255, 255, 255, 0.06)',
+              }
+            },
+            animation: {
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }
+          }
         }
-        .font-manus {
-            font-family: 'Playfair Display', serif;
+      }
+    </script>
+    <style>
+        :root {
+          --safe-area-inset-top: env(safe-area-inset-top);
+          --safe-area-inset-bottom: env(safe-area-inset-bottom);
+        }
+        body {
+            transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            background-color: #0A0A0A;
+            user-select: none;
+            overscroll-behavior-y: none;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @keyframes slideInUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+
+        .safe-pb { padding-bottom: var(--safe-area-inset-bottom); }
+        .safe-pt { padding-top: var(--safe-area-inset-top); }
+
+        /* Premium Dark Mode Glassmorphism */
+        .glass {
+          background: rgba(20, 20, 20, 0.7);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        /* Markdown Styling - Refined for Contrast */
+        .markdown-content p { margin-bottom: 1rem; line-height: 1.6; }
+        .markdown-content p:last-child { margin-bottom: 0; }
+        .markdown-content ul { list-style-type: disc; margin-left: 1.25rem; margin-bottom: 1rem; }
+        .markdown-content li { margin-bottom: 0.5rem; }
+        .markdown-content code { 
+          background: rgba(255,255,255,0.08); 
+          padding: 0.2rem 0.4rem; 
+          border-radius: 0.5rem; 
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 0.85em; 
+          color: #93c5fd;
+        }
+        .markdown-content pre { 
+          background: rgba(0,0,0,0.4); 
+          padding: 1.25rem; 
+          border-radius: 1.25rem; 
+          border: 1px solid rgba(255,255,255,0.06); 
+          overflow-x: auto; 
+          margin: 1.25rem 0;
+        }
+        .markdown-content pre code { 
+          background: transparent; 
+          padding: 0; 
+          display: block; 
+          color: #d1d5db;
+        }
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 { 
+          font-weight: 800; 
+          margin-top: 1.5rem; 
+          margin-bottom: 0.75rem; 
+          letter-spacing: -0.02em;
+          color: white;
+        }
+        .markdown-content h1 { font-size: 1.5rem; }
+        .markdown-content h2 { font-size: 1.25rem; }
+        .markdown-content strong { font-weight: 700; color: white; }
+
+        /* Mobile specific bubble adjustments */
+        .bubble-shadow {
+          box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
         }
     </style>
 <script type="importmap">
@@ -26,12 +117,14 @@
     "react/": "https://esm.sh/react@^19.2.4/",
     "react": "https://esm.sh/react@^19.2.4",
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.41.0"
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react-markdown": "https://esm.sh/react-markdown@^9.0.0",
+    "remark-gfm": "https://esm.sh/remark-gfm@^4.0.0"
   }
 }
 </script>
 </head>
-<body>
+<body class="bg-[#0A0A0A]">
     <div id="root"></div>
 </body>
 </html>

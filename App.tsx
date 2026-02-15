@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Header from './components/Header.tsx';
 import CategoryTabs from './components/CategoryTabs.tsx';
 import ProjectItem from './components/ProjectItem.tsx';
@@ -9,9 +9,12 @@ import SettingsMenu from './components/SettingsMenu.tsx';
 import SkillsModal from './components/SkillsModal.tsx';
 import ConnectorsModal from './components/ConnectorsModal.tsx';
 import SubscriptionModal from './components/SubscriptionModal.tsx';
-// Fix: Added Plus to the lucide-react import list as it's used on line 308.
-import { LogIn, Sparkles, Layout, ShieldCheck, Zap, FolderOpen, Box, Plus } from 'lucide-react';
-import { Category, Project } from './types.ts';
+import AgentManagerModal from './components/AgentManagerModal.tsx';
+import { Sparkles, FolderOpen, Coffee, Zap, User, Search, Bot } from 'lucide-react';
+import { Category, Project, CustomAgent } from './types.ts';
+
+const STORAGE_KEY = 'manus_projects_v1';
+const AGENTS_STORAGE_KEY = 'manus_custom_agents_v1';
 
 const INITIAL_PROJECTS: Project[] = [
   {
@@ -34,58 +37,90 @@ const INITIAL_PROJECTS: Project[] = [
     date: 'Mon',
     icon: 'chart',
     category: 'All',
-    status: 'completed'
+    status: 'completed',
+    messages: []
   },
   {
     id: '3',
-    title: 'System Health Automation',
-    description: 'Scheduled maintenance sequence successfully deployed.',
-    date: 'Fri',
-    icon: 'chart',
-    category: 'Scheduled',
-    status: 'completed',
-    isDashedIcon: true
-  },
-  {
-    id: '4',
-    title: 'Portfolio Draft',
-    description: 'Initial scaffolding for a 3D personal portfolio.',
-    date: 'Draft',
-    icon: 'game',
+    title: 'AI Art Generator',
+    description: 'A platform for generating unique AI-powered art pieces.',
+    date: 'Tue',
+    icon: 'palette',
     category: 'All',
-    status: 'pending',
-    progress: 10
+    status: 'completed',
+    messages: []
   }
 ];
 
 const App: React.FC = () => {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [customAgents, setCustomAgents] = useState<CustomAgent[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category>('All');
   const [currentView, setCurrentView] = useState<'home' | 'chat'>('home');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [isConnectorsOpen, setIsConnectorsOpen] = useState(false);
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
-  
+  const [isAgentManagerOpen, setIsAgentManagerOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState<{name: string, email: string, photo: string} | null>(null);
   const [credits, setCredits] = useState(0);
 
-  const filteredProjects = useMemo(() => {
-    return INITIAL_PROJECTS.filter(p => {
-      const matchesCategory = activeCategory === 'All' || p.category === activeCategory;
-      const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           p.description.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
-    });
-  }, [activeCategory, searchQuery]);
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.body.style.backgroundColor = '#0A0A0A';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.style.backgroundColor = '#fcfcfc';
+    }
+  }, [isDarkMode]);
 
-  // Sectioning logic
-  const activeTasks = filteredProjects.filter(p => p.status === 'pending' && (p.progress || 0) > 20);
+  useEffect(() => {
+    // Load Projects
+    const savedProjects = localStorage.getItem(STORAGE_KEY);
+    if (savedProjects) {
+      try {
+        const parsed = JSON.parse(savedProjects);
+        setProjects(parsed.map((p: any) => ({
+          ...p,
+          messages: (p.messages || []).map((m: any) => ({ 
+            ...m, 
+            timestamp: m.timestamp ? new Date(m.timestamp) : new Date() 
+          }))
+        })));
+      } catch (e) { setProjects(INITIAL_PROJECTS); }
+    } else { setProjects(INITIAL_PROJECTS); }
+
+    // Load Agents
+    const savedAgents = localStorage.getItem(AGENTS_STORAGE_KEY);
+    if (savedAgents) {
+      try { setCustomAgents(JSON.parse(savedAgents)); } catch (e) { setCustomAgents([]); }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (projects.length > 0) localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  }, [projects]);
+
+  useEffect(() => {
+    localStorage.setItem(AGENTS_STORAGE_KEY, JSON.stringify(customAgents));
+  }, [customAgents]);
+
+  const filteredProjects = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    return projects.filter(p => {
+      const matchesCategory = activeCategory === 'All' || p.category === activeCategory;
+      if (!query) return matchesCategory;
+      return matchesCategory && (p.title.toLowerCase().includes(query) || p.description.toLowerCase().includes(query));
+    });
+  }, [projects, activeCategory, searchQuery]);
+
+  const activeTasks = filteredProjects.filter(p => p.status === 'pending');
   const historyProjects = filteredProjects.filter(p => p.status === 'completed');
-  const draftsAndTemplates = filteredProjects.filter(p => p.status === 'pending' && (p.progress || 0) <= 20);
 
   const handleOpenProject = (project: Project) => {
     setSelectedProject(project);
@@ -97,229 +132,149 @@ const App: React.FC = () => {
     setCurrentView('chat');
   };
 
-  const handleGoogleLogin = () => {
-    const simulatedUser = {
-      name: 'Agent Explorer',
-      email: 'user@manus.ai',
-      photo: 'https://ui-avatars.com/api/?name=Agent+Explorer&background=0D8ABC&color=fff'
-    };
-    setIsLoggedIn(true);
-    setUser(simulatedUser);
-    setCredits(1000);
+  const updateProject = (projectId: string, updates: Partial<Project>) => {
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updates } : p));
   };
 
-  const deductCredits = (amount: number): boolean => {
-    if (credits < amount) {
-      setIsSubscriptionOpen(true);
-      return false;
-    }
-    setCredits(prev => prev - amount);
-    return true;
+  const createProject = (newProject: Project) => {
+    setProjects(prev => [newProject, ...prev]);
+    setSelectedProject(newProject);
   };
 
   const handleSettingAction = (action: string) => {
     switch (action) {
+      case 'history': setCurrentView('home'); setIsSettingsOpen(false); break;
       case 'skills': setIsSkillsOpen(true); break;
       case 'connectors': setIsConnectorsOpen(true); break;
       case 'credits': setIsSubscriptionOpen(true); break;
+      case 'agents': setIsAgentManagerOpen(true); break;
       case 'login': handleGoogleLogin(); break;
       case 'logout': setIsLoggedIn(false); setUser(null); setCredits(0); break;
-      case 'mail': window.open(`mailto:support@manus.ai`); break;
-      default: break;
     }
+  };
+
+  const handleGoogleLogin = () => {
+    setIsLoggedIn(true);
+    setUser({
+      name: 'User',
+      email: 'user@manus.ai',
+      photo: 'https://ui-avatars.com/api/?name=User&background=2563EB&color=fff'
+    });
+    setCredits(1000);
   };
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen max-w-md mx-auto bg-[#080808] flex flex-col p-8 justify-between relative overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-blue-600/10 blur-[120px] rounded-full -z-10" />
-        
-        <div className="mt-20 space-y-8 flex flex-col items-center text-center">
-          <div className="w-20 h-20 bg-white/5 rounded-[2.5rem] border border-white/10 flex items-center justify-center shadow-2xl relative">
-            <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full" />
-            <Layout className="w-10 h-10 text-white relative z-10" />
+      <main className="h-screen flex flex-col p-10 justify-between bg-[#0A0A0A] text-white relative overflow-hidden">
+        <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
+          <div className="absolute top-[-20%] left-[-20%] w-[80%] h-[80%] bg-blue-600/20 blur-[150px] rounded-full" />
+        </div>
+        <div className="mt-20 flex flex-col items-center text-center relative z-10">
+          <div className="w-24 h-24 rounded-[2.5rem] bg-white/[0.03] border border-white/10 flex items-center justify-center shadow-2xl">
+            <Sparkles className="w-12 h-12 text-blue-500" fill="currentColor" />
           </div>
-          <div className="space-y-4">
-            <h1 className="text-4xl font-manus lowercase tracking-tight">manus</h1>
-            <p className="text-sm text-white/40 leading-relaxed px-6 font-medium">
-              Autonomous multi-agent orchestration. <br/> Engineering at the speed of thought.
-            </p>
+          <div className="mt-10 space-y-4">
+            <h1 className="text-5xl font-manus lowercase tracking-tighter">manus</h1>
+            <p className="text-[15px] opacity-40 font-medium tracking-tight">The first autonomous AI agent framework.</p>
           </div>
         </div>
-
-        <div className="space-y-6">
-          <div className="bg-white/5 rounded-3xl p-6 border border-white/10 space-y-4 backdrop-blur-md">
-             <div className="flex items-center space-x-3 text-blue-400">
-                <ShieldCheck size={18} strokeWidth={2.5} />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Neural Network Secure</span>
-             </div>
-             <p className="text-[13px] text-white/70 leading-relaxed font-semibold">
-               Sign up now to receive <span className="text-blue-400 font-black">1,000 Free Credits</span> to kickstart your first autonomous build.
-             </p>
-          </div>
-
-          <button 
-            onClick={handleGoogleLogin}
-            className="group w-full bg-white text-black h-16 rounded-[2rem] font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-3 hover:bg-white/90 active:scale-[0.98] transition-all shadow-xl shadow-white/5"
-          >
-            <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5" />
+        <div className="space-y-6 relative z-10 safe-pb">
+          <button onClick={handleGoogleLogin} className="w-full h-18 bg-white text-black rounded-[2rem] font-black text-[13px] uppercase tracking-[0.2em] flex items-center justify-center space-x-4 active:scale-95 transition-all">
+            <img src="https://www.google.com/favicon.ico" alt="" className="w-5 h-5" />
             <span>Continue with Google</span>
           </button>
-          
-          <p className="text-[10px] text-white/10 text-center font-bold uppercase tracking-widest">
-            Manus Labs © 2025 • Enterprise Ready
-          </p>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="min-h-screen max-w-md mx-auto bg-[#121212] relative flex flex-col font-sans overflow-hidden border-x border-white/5">
+    <div className="h-screen flex flex-col bg-[#0A0A0A] text-white overflow-hidden safe-pt">
       {currentView === 'chat' ? (
         <ChatPage 
-          onBack={() => setCurrentView('home')} 
-          initialMessages={selectedProject?.messages || []}
-          initialTitle={selectedProject?.title}
+          onBack={() => { setCurrentView('home'); setSelectedProject(null); }} 
+          project={selectedProject}
+          onCreateProject={createProject}
+          onUpdateProject={updateProject}
           credits={credits}
-          onDeductCredits={deductCredits}
+          onDeductCredits={(amt) => { if (credits < amt) { setIsSubscriptionOpen(true); return false; } setCredits(prev => prev - amt); return true; }}
+          isDarkMode={isDarkMode}
+          onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+          customAgents={customAgents}
+          onOpenAgentManager={() => setIsAgentManagerOpen(true)}
         />
       ) : (
-        <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-bottom duration-700">
-          <SettingsMenu 
-            isOpen={isSettingsOpen} 
-            onClose={() => setIsSettingsOpen(false)} 
-            onAction={handleSettingAction}
-            credits={credits}
-            isLoggedIn={isLoggedIn}
-            user={user}
-          />
-
-          <SkillsModal 
-            isOpen={isSkillsOpen} 
-            onClose={() => setIsSkillsOpen(false)} 
-            onSkillClick={() => setCurrentView('chat')}
-          />
+        <div className="flex-1 flex flex-col relative h-full">
+          <SettingsMenu isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onAction={handleSettingAction} credits={credits} isLoggedIn={isLoggedIn} user={user} isDarkMode={isDarkMode} />
+          <SkillsModal isOpen={isSkillsOpen} onClose={() => setIsSkillsOpen(false)} onSkillClick={handleNewChat} />
+          <ConnectorsModal isOpen={isConnectorsOpen} onClose={() => setIsConnectorsOpen(false)} isDarkMode={isDarkMode} />
+          <SubscriptionModal isOpen={isSubscriptionOpen} onClose={() => setIsSubscriptionOpen(false)} onPurchase={(amt) => { setCredits(prev => prev + amt); setIsSubscriptionOpen(false); }} isDarkMode={isDarkMode} />
+          <AgentManagerModal isOpen={isAgentManagerOpen} onClose={() => setIsAgentManagerOpen(false)} agents={customAgents} onUpdateAgents={setCustomAgents} />
           
-          <ConnectorsModal 
-            isOpen={isConnectorsOpen} 
-            onClose={() => setIsConnectorsOpen(false)} 
-          />
-
-          <SubscriptionModal
-            isOpen={isSubscriptionOpen}
-            onClose={() => setIsSubscriptionOpen(false)}
-            onPurchase={(amt) => {
-              setCredits(prev => prev + amt);
-              setIsSubscriptionOpen(false);
-            }}
-          />
-
-          <Header 
-            onProfileClick={() => setIsSettingsOpen(true)} 
-            credits={credits}
-            isLoggedIn={isLoggedIn}
-          />
-
-          <main className="flex-1 overflow-y-auto pb-32 no-scrollbar">
-            {/* Search Bar */}
+          <Header onProfileClick={() => setIsSettingsOpen(true)} credits={credits} isLoggedIn={isLoggedIn} isDarkMode={isDarkMode} onToggleTheme={() => setIsDarkMode(!isDarkMode)} />
+          
+          <main className="flex-1 overflow-y-auto no-scrollbar pb-40">
             <div className="px-6 pt-6 pb-2">
-              <div className="relative bg-white/5 rounded-3xl border border-white/5 flex items-center px-5 py-4 group focus-within:border-white/20 transition-all shadow-inner">
-                <input 
-                  type="text" 
-                  placeholder="Search your neural repository..." 
-                  className="bg-transparent border-none outline-none w-full text-white placeholder:text-white/10 text-sm font-medium"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
+              <div className="group relative rounded-2xl bg-white/[0.03] border border-white/5 flex items-center px-5 py-4 focus-within:border-blue-500/30 transition-all">
+                <Search size={18} className="mr-4 opacity-20 group-focus-within:text-blue-500 transition-all" />
+                <input type="text" placeholder="Find your creations..." className="bg-transparent border-none outline-none w-full text-[14px] font-bold text-white placeholder:opacity-20" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
               </div>
             </div>
 
-            {/* Navigation Tabs */}
-            <CategoryTabs 
-              activeCategory={activeCategory} 
-              onCategoryChange={setActiveCategory} 
-            />
-
-            {/* 1. Active Tasks Section */}
-            {activeTasks.length > 0 && (
-              <section className="mt-6">
-                <div className="px-6 mb-3 flex items-center justify-between">
-                  <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] flex items-center space-x-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
-                    <span>Live Processes</span>
-                  </h2>
-                  <span className="text-[10px] font-bold text-white/10">{activeTasks.length} RUNNING</span>
-                </div>
-                <div className="space-y-1">
-                  {activeTasks.map((project) => (
-                    <div key={project.id} onClick={() => handleOpenProject(project)}>
-                      <ProjectItem project={project} />
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* 2. Project History Section */}
-            <section className="mt-8">
-              <div className="px-6 mb-3 flex items-center justify-between">
-                <h2 className="text-[10px] font-black text-white/20 uppercase tracking-[0.25em] flex items-center space-x-2">
-                   <FolderOpen size={10} />
-                   <span>Neural History</span>
-                </h2>
-                <span className="text-[10px] font-bold text-white/10">{historyProjects.length} ARCHIVED</span>
+            <CategoryTabs activeCategory={activeCategory} onCategoryChange={setActiveCategory} isDarkMode={isDarkMode} />
+            
+            {filteredProjects.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 opacity-10">
+                <Coffee size={48} strokeWidth={1.5} />
+                <p className="mt-4 text-[11px] font-black uppercase tracking-[0.4em]">Zero Results</p>
               </div>
-              {historyProjects.length > 0 ? (
-                <div className="space-y-1">
-                  {historyProjects.map((project) => (
-                    <div key={project.id} onClick={() => handleOpenProject(project)}>
-                      <ProjectItem project={project} />
+            ) : (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+                {activeTasks.length > 0 && (
+                  <section>
+                    <div className="px-8 mb-4 flex items-center space-x-2.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                      <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.4em]">Live Synthesis</h2>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="px-6 py-8 border border-dashed border-white/5 mx-6 rounded-3xl flex flex-col items-center justify-center text-center space-y-2">
-                   <Zap size={20} className="text-white/10" />
-                   <p className="text-[11px] font-bold text-white/10 uppercase tracking-widest">No completed tasks</p>
-                </div>
-              )}
-            </section>
-
-            {/* 3. New Section: Templates & Drafts */}
-            <section className="mt-8">
-               <div className="px-6 mb-3 flex items-center justify-between">
-                  <h2 className="text-[10px] font-black text-purple-400/50 uppercase tracking-[0.25em] flex items-center space-x-2">
-                     <Box size={10} />
-                     <span>Drafts & Templates</span>
-                  </h2>
-               </div>
-               {draftsAndTemplates.length > 0 ? (
-                 <div className="space-y-1">
-                   {draftsAndTemplates.map((project) => (
-                     <div key={project.id} onClick={() => handleOpenProject(project)}>
-                       <ProjectItem project={project} />
-                     </div>
-                   ))}
-                 </div>
-               ) : (
-                 <div className="px-6 py-6 mx-6 bg-white/[0.02] rounded-3xl border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-white/5 transition-colors">
-                    <div className="flex items-center space-x-4">
-                       <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center text-white/20">
-                          <Plus size={18} />
-                       </div>
-                       <div className="flex flex-col">
-                          <span className="text-xs font-bold text-white/40">Initialize New Draft</span>
-                          <span className="text-[10px] text-white/10 uppercase font-black">Ready for deployment</span>
-                       </div>
+                    <div className="space-y-1">
+                      {activeTasks.map((p) => (
+                        <button key={p.id} onClick={() => handleOpenProject(p)} className="w-full text-left"><ProjectItem project={p} isDarkMode={isDarkMode} /></button>
+                      ))}
                     </div>
-                    <div className="text-[10px] font-black text-blue-500/50 uppercase tracking-widest">Empty</div>
-                 </div>
-               )}
-            </section>
+                  </section>
+                )}
+                <section className="mt-10">
+                  <div className="px-8 mb-4 flex items-center space-x-2.5 opacity-20">
+                    <FolderOpen size={12} />
+                    <h2 className="text-[10px] font-black uppercase tracking-[0.4em]">Archive</h2>
+                  </div>
+                  <div className="space-y-1">
+                    {historyProjects.map((p) => (
+                      <button key={p.id} onClick={() => handleOpenProject(p)} className="w-full text-left"><ProjectItem project={p} isDarkMode={isDarkMode} /></button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
           </main>
-
-          <FloatingButton onClick={handleNewChat} />
+          
+          <FloatingButton onClick={handleNewChat} isDarkMode={isDarkMode} />
+          
+          <nav className="absolute bottom-6 left-6 right-6 h-20 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] flex items-center justify-around px-8 shadow-2xl z-20">
+             <button className="text-blue-500 flex flex-col items-center space-y-1">
+                <Zap size={22} fill="currentColor" />
+                <span className="text-[9px] font-black uppercase tracking-widest">Core</span>
+                <div className="w-1 h-1 bg-blue-500 rounded-full mt-0.5" />
+             </button>
+             <button onClick={() => setIsAgentManagerOpen(true)} className="text-white/20 hover:text-white transition-all flex flex-col items-center space-y-1">
+                <Bot size={22} />
+                <span className="text-[9px] font-black uppercase tracking-widest">Agents</span>
+             </button>
+             <button onClick={() => setIsSettingsOpen(true)} className="text-white/20 hover:text-white transition-all flex flex-col items-center space-y-1">
+                <User size={22} />
+                <span className="text-[9px] font-black uppercase tracking-widest">Self</span>
+             </button>
+          </nav>
         </div>
       )}
     </div>

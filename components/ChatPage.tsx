@@ -1,316 +1,385 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  ChevronLeft, ChevronDown, Sparkles, Mic, ArrowUp, Plus, User, 
-  Loader2, Smartphone, Terminal, Workflow, BrainCircuit, ShieldCheck, 
-  Rocket, Shield, Palette, Monitor, Globe, Play, ExternalLink
+  Sparkles, ArrowUp, Plus, Loader2, X, 
+  Globe, Smartphone, AlertCircle, ArrowLeft, 
+  FileText, Share, Download, Play, CheckCircle2,
+  Terminal, BrainCircuit, User, ChevronDown, 
+  Shield, Zap, Palette, Bot, Settings2, Save, BookmarkCheck,
+  ListTodo, Search, Code, Construction, Activity,
+  Layout, Kanban, ShoppingCart, LineChart, HeartPulse,
+  FileUp, FileCheck, Layers, Gamepad2, Box, Cpu, Upload, ExternalLink,
+  AlertTriangle
 } from 'lucide-react';
-import SkillsModal from './SkillsModal.tsx';
-import ConnectorsModal from './ConnectorsModal.tsx';
-import WebsitePreview from './WebsitePreview.tsx';
-import MobileAppPreview from './MobileAppPreview.tsx';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { ChatMessage, AgentStep } from '../types.ts';
+import { ChatMessage, Project, CustomAgent, AIProvider, AgentStep } from '../types.ts';
+import MobileAppPreview from './MobileAppPreview.tsx';
+import WebsitePreview from './WebsitePreview.tsx';
+import PublishModal from './PublishModal.tsx';
 
 interface ChatPageProps {
   onBack: () => void;
-  initialMessages?: ChatMessage[];
-  initialTitle?: string;
+  project: Project | null;
+  onCreateProject: (p: Project) => void;
+  onUpdateProject: (id: string, updates: Partial<Project>) => void;
   credits: number;
   onDeductCredits: (amount: number) => boolean;
+  isDarkMode: boolean;
+  onToggleTheme: () => void;
+  onExportProject?: (project: Project) => void;
+  customAgents?: CustomAgent[];
+  onOpenAgentManager?: () => void;
 }
+
+interface Attachment {
+  id: string;
+  file: File;
+  preview: string;
+  type: 'image' | 'code' | 'file';
+  content?: string;
+  status: 'processing' | 'ready' | 'error';
+  progress: number;
+}
+
+const DEFAULT_AGENT: CustomAgent = {
+  id: 'manus-core',
+  name: 'Manus Core',
+  systemInstruction: 'You are a World-Class Senior Full-Stack Developer and SEO Expert. Build unique, high-fidelity applications with perfect SEO optimization.',
+  iconType: 'brain',
+  color: '#2563EB',
+  provider: 'gemini'
+};
+
+const SUGGESTIONS = [
+  { label: 'Build Python app', icon: <Terminal size={14} />, prompt: 'Build a powerful Python application that automates data processing with a clean CLI interface.' },
+  { label: '2D Platformer', icon: <Gamepad2 size={14} />, prompt: 'Create a 2D platformer game engine with physics, parallax scrolling, and a character controller.' },
+  { label: '3D RPG World', icon: <Box size={14} />, prompt: 'Generate a 3D RPG world environment using Three.js with dynamic lighting and interactive objects.' },
+  { label: 'AI NPC Behavior', icon: <BrainCircuit size={14} />, prompt: 'Script an advanced AI behavior tree for NPCs that react to player movements and environment changes.' },
+  { label: 'Physics Engine', icon: <Cpu size={14} />, prompt: 'Build a custom 2D physics engine from scratch supporting collisions, gravity, and friction.' },
+  { label: 'Inventory System', icon: <Layers size={14} />, prompt: 'Design a modular RPG inventory system with drag-and-drop support and item metadata.' },
+];
 
 const toolDeclarations: FunctionDeclaration[] = [
   {
     name: 'build_website',
-    description: 'Generates a production-ready website with advanced HTML and CSS.',
+    description: 'Generates a unique, production-ready website. MUST include SEO meta tags, Open Graph data, JSON-LD schema, and semantic HTML.',
     parameters: {
       type: Type.OBJECT,
-      description: 'The content and structural parameters for the website.',
       properties: {
-        description: { type: Type.STRING, description: 'Brief description of the website content.' },
-        html_code: { type: Type.STRING, description: 'The complete self-contained HTML/CSS source code.' },
+        description: { type: Type.STRING, description: "Technical and SEO strategy breakdown." },
+        html_code: { type: Type.STRING, description: "Complete source with SEO headers and semantic body." },
       },
       required: ['description', 'html_code'],
     },
   },
   {
     name: 'build_mobile_app',
-    description: 'Generates a cross-platform mobile app source code using React Native or Flutter.',
+    description: 'Generates a mobile app simulation using Web technologies. MUST include app-specific metadata and semantic structure.',
     parameters: {
       type: Type.OBJECT,
-      description: 'The architecture and logic parameters for the mobile application.',
       properties: {
-        platform: { type: Type.STRING, enum: ['React Native', 'Flutter'], description: 'The target mobile framework.' },
-        description: { type: Type.STRING, description: 'Functional overview of the app features.' },
-        code: { type: Type.STRING, description: 'The main entry point source code for the app.' },
+        platform: { type: Type.STRING, enum: ['React Native', 'Flutter'] },
+        code: { type: Type.STRING, description: "HTML/Tailwind/JS code optimized for 9:16 simulation." },
+        app_name: { type: Type.STRING },
+        app_icon_description: { type: Type.STRING }
       },
-      required: ['platform', 'description', 'code'],
+      required: ['platform', 'code', 'app_name'],
     },
   }
 ];
 
-const ChatPage: React.FC<ChatPageProps> = ({ onBack, initialMessages = [], initialTitle, credits, onDeductCredits }) => {
-  const [isSkillsOpen, setIsSkillsOpen] = useState(false);
-  const [isConnectorsOpen, setIsConnectorsOpen] = useState(false);
-  const [previewCode, setPreviewCode] = useState<string | null>(null);
-  const [mobileAppPreview, setMobileAppPreview] = useState<ChatMessage['mobileAppData'] | null>(null);
+const ChatPage: React.FC<ChatPageProps> = ({ 
+  onBack, project, onCreateProject, onUpdateProject, 
+  credits, onDeductCredits, isDarkMode, onToggleTheme, 
+  onExportProject, customAgents = [], onOpenAgentManager 
+}) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>(project?.messages || []);
   const [isLoading, setIsLoading] = useState(false);
-  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const [loadingSteps, setLoadingSteps] = useState<AgentStep[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(project?.agentId || 'manus-core');
+  const [isAgentSelectorOpen, setIsAgentSelectorOpen] = useState(false);
+  const [previewWebCode, setPreviewWebCode] = useState<string | null>(null);
+  const [previewMobileData, setPreviewMobileData] = useState<{platform: 'React Native' | 'Flutter', code: string, appName?: string, appIcon?: string} | null>(null);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const allAgents = [DEFAULT_AGENT, ...customAgents];
+  const selectedAgent = allAgents.find(a => a.id === selectedAgentId) || DEFAULT_AGENT;
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' }); 
+    }
   }, [messages, isLoading]);
 
-  const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
-    const symbol = type === 'error' ? '✖' : type === 'success' ? '✔' : '›';
-    setTerminalLogs(prev => [...prev.slice(-15), `[${new Date().toLocaleTimeString()}] ${symbol} ${msg}`]);
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+    const newAttachments: Attachment[] = files.map(file => ({
+      id: Math.random().toString(36).substring(2, 9),
+      file, preview: '',
+      type: file.type.startsWith('image/') ? 'image' : (file.name.match(/\.(ts|tsx|js|jsx|html|css|py|json|md|txt)$/i) ? 'code' : 'file'),
+      status: 'processing', progress: 0
+    }));
+    setAttachments(prev => [...prev, ...newAttachments]);
+    e.target.value = '';
+    for (const attachment of newAttachments) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        updateAttachment(attachment.id, { preview: attachment.type === 'image' ? reader.result as string : '', content: attachment.type !== 'image' ? reader.result as string : undefined, status: 'ready', progress: 100 });
+      };
+      if (attachment.type === 'image') reader.readAsDataURL(attachment.file);
+      else reader.readAsText(attachment.file);
+    }
   };
 
-  const handleSendMessage = async (textOverride?: string) => {
-    const currentInput = textOverride || input;
-    if (!currentInput.trim() || isLoading) return;
+  const updateAttachment = (id: string, updates: Partial<Attachment>) => setAttachments(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
 
-    // Credit check (base cost for interaction)
-    if (!onDeductCredits(5)) return;
+  const handleSendMessage = async (customInput?: string) => {
+    const finalInput = customInput || input;
+    const readyAttachments = attachments.filter(a => a.status === 'ready');
+    if ((!finalInput.trim() && readyAttachments.length === 0) || isLoading) return;
+    
+    setError(null);
+    if (!onDeductCredits(50)) return;
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: currentInput.trim(),
-      timestamp: new Date(),
-    };
+    let combinedText = finalInput.trim();
+    const currentAttachments = [...readyAttachments];
+    currentAttachments.forEach(att => {
+      if (att.type !== 'image' && att.content) combinedText += `\n\n[FILE: ${att.file.name}]\n\`\`\`\n${att.content}\n\`\`\``;
+    });
 
-    setMessages(prev => [...prev, userMessage]);
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: finalInput.trim() || `Command with ${currentAttachments.length} items`, timestamp: new Date(), agentId: selectedAgentId };
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setAttachments([]);
     setIsLoading(true);
-    setTerminalLogs([]);
+
+    const initialSteps: AgentStep[] = [
+      { id: 'step-1', type: 'plan', label: 'Analyzing Complex Goal', status: 'running' },
+      { id: 'step-2', type: 'search', label: 'Decomposing Sub-tasks', status: 'pending' },
+      { id: 'step-3', type: 'code', label: 'Building Technical Logic', status: 'pending' },
+      { id: 'step-4', type: 'action', label: 'Finalizing Output', status: 'pending' }
+    ];
+    setLoadingSteps(initialSteps);
 
     try {
-      // Fix: Always initialize GoogleGenAI with apiKey from process.env.API_KEY directly.
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      addLog("Initializing autonomous orchestration...");
+      // Use custom API Key if available, else fallback to default
+      const effectiveApiKey = selectedAgent.apiKey || process.env.API_KEY;
+      const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
       
+      const parts: any[] = [{ text: combinedText || "Initialize protocol." }];
+      currentAttachments.forEach(att => {
+        if (att.type === 'image' && att.preview) parts.push({ inlineData: { data: att.preview.split(',')[1], mimeType: att.file.type || 'image/png' } });
+      });
+
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: selectedAgent.provider === 'gemini' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
         contents: [
-          ...messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
-          { role: 'user', parts: [{ text: currentInput }] }
+          ...messages.map(m => ({ role: m.role as any, parts: [{ text: m.text }] })), 
+          { role: 'user', parts }
         ],
-        config: {
-          systemInstruction: "You are Manus v2.5. You build complete, functional web and mobile applications. When tool-calling, ensure the code provided is high-quality and production-ready.",
-          tools: [{ functionDeclarations: toolDeclarations }]
+        config: { 
+          thinkingConfig: selectedAgentId === 'manus-core' ? { thinkingBudget: 32768 } : undefined,
+          systemInstruction: `${selectedAgent.systemInstruction}\nMODULAR SYNTHESIS PROTOCOL ACTIVE.`, 
+          tools: [{ functionDeclarations: toolDeclarations }] 
         }
       });
 
-      let extractedWebCode = '';
-      let mobileAppData: ChatMessage['mobileAppData'] | undefined;
-
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        // High-level generation cost
-        if (!onDeductCredits(95)) {
-            setIsLoading(false);
-            return;
-        }
-
+      let webCode = project?.websiteCode;
+      let mobileData = project?.mobileAppData;
+      if (response && response.functionCalls) {
         for (const call of response.functionCalls) {
-          if (call.name === 'build_website') {
-            addLog("Compiling UI framework...");
-            extractedWebCode = call.args.html_code;
-            await new Promise(r => setTimeout(r, 1000));
-            addLog("Global deployment complete.", 'success');
-          } else if (call.name === 'build_mobile_app') {
-            addLog(`Scaffolding ${call.args.platform} bridge...`);
-            mobileAppData = { platform: call.args.platform, code: call.args.code, description: call.args.description };
-            await new Promise(r => setTimeout(r, 1500));
-            addLog("Mobile binary ready for testing.", 'success');
-          }
+          const args = (call.args as any) || {};
+          if (call.name === 'build_website') webCode = args.html_code;
+          if (call.name === 'build_mobile_app') mobileData = { platform: args.platform || 'React Native', code: args.code, description: args.description || 'Architecture', appName: args.app_name };
         }
       }
 
-      const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'model',
-        text: response.text || "Engineering process complete. See results below.",
-        timestamp: new Date(),
-        websiteCode: extractedWebCode,
-        mobileAppData
+      const aiMsg: ChatMessage = { 
+        id: (Date.now() + 1).toString(), role: 'model', text: response?.text || 'Synthesis complete.', timestamp: new Date(), 
+        websiteCode: webCode, mobileAppData: mobileData, agentId: selectedAgentId, steps: loadingSteps.map(s => ({...s, status: 'completed'}))
       };
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => [...prev, aiMsg]);
+      
+      if (project) onUpdateProject(project.id, { messages: [...messages, userMsg, aiMsg], websiteCode: webCode, mobileAppData: mobileData });
+      else onCreateProject({ id: Date.now().toString(), title: userMsg.text.slice(0, 30), description: aiMsg.text.slice(0, 100), date: 'Today', icon: webCode ? 'web' : mobileData ? 'mobile' : 'game', category: 'All', status: 'completed', messages: [userMsg, aiMsg], websiteCode: webCode, mobileAppData: mobileData, agentId: selectedAgentId });
+      
     } catch (err: any) {
-      addLog(`Critical Failure: ${err.message}`, 'error');
+      console.error(err);
+      let errorMsg = "An unexpected neural fault occurred.";
+      if (err.message?.includes('429') || err.message?.toLowerCase().includes('quota')) {
+        errorMsg = "Quota Exceeded. Please check your Agent's API Key in the Fleet Manager or wait for reset.";
+      } else if (err.message?.includes('API_KEY_INVALID')) {
+        errorMsg = "Invalid API Key. Please update your Agent credentials.";
+      }
+      setError(errorMsg);
+      // Remove the last user message if it failed to process to keep history clean
+      setMessages(prev => prev.slice(0, -1));
     } finally {
       setIsLoading(false);
+      setLoadingSteps([]);
+    }
+  };
+
+  const getAgentIcon = (type: string, color: string) => {
+    const props = { size: 16, style: { color } };
+    switch (type) {
+      case 'brain': return <BrainCircuit {...props} />;
+      case 'shield': return <Shield {...props} />;
+      case 'palette': return <Palette {...props} />;
+      case 'zap': return <Zap {...props} />;
+      case 'bot': return <Bot {...props} />;
+      default: return <Sparkles {...props} />;
     }
   };
 
   return (
-    <div className="h-screen max-w-md mx-auto bg-[#080808] flex flex-col relative text-white">
-      {/* Dynamic Header */}
-      <div className="flex items-center justify-between px-4 py-5 shrink-0 border-b border-white/5 bg-[#080808]/95 backdrop-blur-xl z-20">
-        <button onClick={onBack} className="p-2 hover:bg-white/5 rounded-xl transition-all"><ChevronLeft className="w-6 h-6" /></button>
-        <div className="flex flex-col items-center">
-            <div className="flex items-center space-x-2 px-3 py-0.5 bg-blue-500/10 rounded-full border border-blue-500/20">
-              <ShieldCheck className="w-3 h-3 text-blue-400" />
-              <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Autonomous</span>
+    <div className="h-screen flex flex-col bg-[#0A0A0A] text-white overflow-hidden safe-pt relative">
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} multiple accept="image/*,.txt,.md,.js,.ts,.tsx,.jsx,.html,.css,.py,.json" />
+      <header className="px-6 py-5 flex items-center justify-between z-[60] bg-black/50 backdrop-blur-xl border-b border-white/[0.04]">
+        <div className="flex items-center space-x-3">
+          <button className="w-10 h-10 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center overflow-hidden active:scale-95 transition-all"><img src="https://ui-avatars.com/api/?name=User&background=2563EB&color=fff" alt="Profile" className="w-full h-full object-cover" /></button>
+          <button onClick={onBack} className="p-2 text-white/30 hover:text-white transition-colors"><ArrowLeft size={20} /></button>
+        </div>
+        <div className="relative">
+          <button onClick={() => setIsAgentSelectorOpen(!isAgentSelectorOpen)} className="flex flex-col items-center group">
+            <div className="flex items-center space-x-2"><span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-500">Autonomous core</span><ChevronDown size={12} className={`text-blue-500 transition-transform ${isAgentSelectorOpen ? 'rotate-180' : ''}`} /></div>
+            <span className="text-[11px] font-bold text-white/40 mt-0.5 flex items-center space-x-1.5 uppercase tracking-widest">{getAgentIcon(selectedAgent.iconType, selectedAgent.color)}<span>{selectedAgent.name}</span></span>
+          </button>
+          {isAgentSelectorOpen && (
+            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-4 w-64 glass rounded-[2rem] shadow-2xl p-2 z-[100] animate-in slide-in-from-top-2 duration-300">
+              <div className="max-h-80 overflow-y-auto no-scrollbar space-y-1">
+                {allAgents.map(agent => (
+                  <button key={agent.id} onClick={() => { setSelectedAgentId(agent.id); setIsAgentSelectorOpen(false); }} className={`w-full flex items-center space-x-3 p-3 rounded-2xl transition-all ${selectedAgentId === agent.id ? 'bg-blue-600/15' : 'hover:bg-white/5'}`}>
+                    <div className="w-9 h-9 rounded-xl bg-black/40 flex items-center justify-center border border-white/5">{getAgentIcon(agent.iconType, agent.color)}</div>
+                    <div className="flex-1 text-left">
+                      <p className="text-[13px] font-bold">{agent.name}</p>
+                      <div className="flex items-center space-x-1.5">
+                        <p className="text-[9px] opacity-40 uppercase tracking-widest">{agent.provider}</p>
+                        {agent.apiKey && <div className="w-1 h-1 rounded-full bg-green-500" title="Custom API Key active" />}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                
+                <div className="pt-2 mt-1 border-t border-white/5">
+                  <button onClick={() => { setIsAgentSelectorOpen(false); onOpenAgentManager?.(); }} className="w-full flex items-center space-x-3 p-3 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 hover:bg-blue-600/20 transition-all group">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600/20 flex items-center justify-center border border-blue-500/20 group-hover:scale-110 transition-transform"><Plus size={16} /></div>
+                    <div className="text-left"><p className="text-[11px] font-black uppercase tracking-widest">Deploy New</p></div>
+                  </button>
+                </div>
+              </div>
             </div>
-            <button className="flex items-center mt-1 text-[14px] font-bold">{initialTitle || 'Manus Ultra'}</button>
+          )}
         </div>
-        <div className="flex items-center space-x-1.5 bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
-          <Sparkles className="w-3.5 h-3.5 text-yellow-400" fill="currentColor" />
-          <span className="text-xs font-black">{credits}</span>
-        </div>
-      </div>
+        <div className="flex items-center space-x-2"><button onClick={() => onBack()} className={`p-2.5 rounded-2xl border transition-all bg-white/5 text-white/30 hover:text-white border-white/5`}><Save size={18} /></button></div>
+      </header>
 
-      {/* Main Conversation */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-10 no-scrollbar">
-        {messages.length === 0 && !isLoading ? (
-          <div className="h-full flex flex-col items-center justify-center text-center space-y-8 px-6">
-            <div className="w-24 h-24 bg-[#111] rounded-[3rem] flex items-center justify-center border border-white/10 relative shadow-2xl">
-              <div className="absolute inset-0 bg-blue-500/5 blur-[40px] rounded-full" />
-              <BrainCircuit className="w-12 h-12 text-blue-500 relative z-10" />
-            </div>
-            <div className="space-y-3">
-              <h2 className="text-3xl font-bold tracking-tight">Manus Agent</h2>
-              <p className="text-white/30 text-sm font-medium leading-relaxed">
-                Provide a prompt to begin autonomous engineering. I can build websites, mobile apps, and complex datasets.
-              </p>
+      <div className="flex-1 overflow-y-auto px-5 py-6 space-y-10 no-scrollbar">
+        {messages.length === 0 && (
+          <div className="h-full flex flex-col items-center justify-center text-center px-10 space-y-4 opacity-20">
+            <Sparkles size={48} />
+            <p className="text-sm font-black uppercase tracking-[0.2em]">Initiate Neural Synthesis</p>
+          </div>
+        )}
+        {messages.map((msg) => (
+          <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+            <div className={`max-w-[85%] rounded-[2rem] px-6 py-4 text-[15px] leading-relaxed shadow-xl ${msg.role === 'user' ? 'bg-blue-600 text-white shadow-blue-600/20' : 'bg-[#141414] border border-white/[0.08] text-white/90'}`}>
+              <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown></div>
+              
+              {msg.role === 'model' && (msg.websiteCode || msg.mobileAppData) && (
+                <div className="mt-5 pt-4 border-t border-white/[0.08] flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2 duration-500">
+                  {msg.websiteCode && (
+                    <button onClick={() => setPreviewWebCode(msg.websiteCode!)} className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-[11px] shadow-lg shadow-blue-600/20 active:scale-95 transition-all">
+                      <Globe size={13} /><span>Preview Website</span>
+                    </button>
+                  )}
+                  {msg.mobileAppData && (
+                    <button onClick={() => setPreviewMobileData(msg.mobileAppData!)} className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-[11px] shadow-lg shadow-blue-600/20 active:scale-95 transition-all">
+                      <Smartphone size={13} /><span>Preview App</span>
+                    </button>
+                  )}
+                  <button onClick={() => setIsPublishModalOpen(true)} className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-white/10 border border-white/10 text-white/60 hover:text-white font-bold text-[11px] active:scale-95 transition-all">
+                    <Upload size={13} /><span>Publish</span>
+                  </button>
+                </div>
+              )}
+
+              {msg.steps && msg.steps.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-white/[0.05] space-y-2.5">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/20">Protocol Breakdown</span>
+                  {msg.steps.map(step => (
+                    <div key={step.id} className="flex items-center space-x-3 opacity-50"><CheckCircle2 size={12} className="text-blue-500" /><span className="text-[12px] font-medium">{step.label}</span></div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          <>
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom duration-500`}>
-                <div className={`flex items-start space-x-3 max-w-[92%] ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
-                    msg.role === 'user' ? 'bg-white/5 border-white/10' : 'bg-blue-600 border-blue-500 shadow-xl shadow-blue-500/20'
-                  }`}>
-                    {msg.role === 'user' ? <User size={16} /> : <div className="text-[11px] font-black tracking-tighter">M</div>}
-                  </div>
-                  <div className="flex flex-col space-y-3">
-                    <div className={`rounded-[1.5rem] px-5 py-4 text-[15px] leading-relaxed shadow-xl ${
-                      msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-[#151515] text-white/90 border border-white/5'
-                    }`}>
-                      {msg.text}
-                    </div>
+        ))}
 
-                    {/* Artifact Actions - Professional Cards */}
-                    {(msg.websiteCode || msg.mobileAppData) && (
-                      <div className="grid grid-cols-1 gap-3 pt-2">
-                        {msg.websiteCode && (
-                          <div className="bg-[#1A1A1A] border border-white/5 rounded-3xl p-4 flex flex-col space-y-4">
-                            <div className="flex items-center space-x-3">
-                               <div className="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400">
-                                  <Monitor size={20} />
-                               </div>
-                               <div className="flex flex-col">
-                                  <span className="text-[13px] font-bold">Web Application</span>
-                                  <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">v1.0.0-neural</span>
-                               </div>
-                            </div>
-                            <button 
-                              onClick={() => setPreviewCode(msg.websiteCode || '')} 
-                              className="w-full h-12 bg-pink-600 hover:bg-pink-700 active:scale-[0.98] transition-all rounded-2xl flex items-center justify-center space-x-2 font-black text-xs uppercase tracking-widest shadow-lg shadow-pink-600/20"
-                            >
-                              <Globe size={16} />
-                              <span>Preview Website</span>
-                            </button>
-                          </div>
-                        )}
-                        {msg.mobileAppData && (
-                          <div className="bg-[#1A1A1A] border border-white/5 rounded-3xl p-4 flex flex-col space-y-4">
-                            <div className="flex items-center space-x-3">
-                               <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
-                                  <Smartphone size={20} />
-                               </div>
-                               <div className="flex flex-col">
-                                  <span className="text-[13px] font-bold">{msg.mobileAppData.platform} Native</span>
-                                  <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Cross-Platform SDK</span>
-                               </div>
-                            </div>
-                            <button 
-                              onClick={() => setMobileAppPreview(msg.mobileAppData || null)} 
-                              className="w-full h-12 bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] transition-all rounded-2xl flex items-center justify-center space-x-2 font-black text-xs uppercase tracking-widest shadow-lg shadow-cyan-600/20"
-                            >
-                              <Play size={16} fill="currentColor" />
-                              <span>Launch Mobile App</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+        {error && (
+          <div className="flex justify-start animate-in slide-in-from-left-4">
+             <div className="bg-red-500/10 border border-red-500/20 rounded-[1.5rem] px-5 py-4 flex items-start space-x-3 max-w-[85%]">
+                <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
+                <div className="space-y-1">
+                  <p className="text-[13px] font-bold text-red-200">{error}</p>
+                  <button onClick={() => onOpenAgentManager?.()} className="text-[10px] uppercase font-black tracking-widest text-red-400 hover:underline">Update Agent Config</button>
                 </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="space-y-6">
-                <div className="flex items-center space-x-3 text-[10px] font-black text-white/40 uppercase tracking-[0.2em] ml-2">
-                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                   <span>Neural Orchestration in Progress</span>
-                </div>
-                <div className="ml-12 bg-black/50 rounded-2xl p-5 border border-white/5 font-mono text-[10px] text-white/20 h-44 overflow-y-auto no-scrollbar shadow-inner">
-                  {terminalLogs.map((log, i) => <div key={i} className="mb-1.5 opacity-80">{log}</div>)}
-                  <div className="flex items-center space-x-1">
-                    <div className="w-1.5 h-3 bg-blue-500/50 animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
+             </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="flex justify-start">
+             <div className="bg-[#141414] border border-white/[0.06] rounded-[2.5rem] px-8 py-7 w-full max-w-[85%] animate-in slide-in-from-bottom-4 duration-500">
+               <div className="flex items-center space-x-4 mb-8">
+                 <div className="w-10 h-10 rounded-2xl bg-blue-600/10 flex items-center justify-center text-blue-500 border border-blue-500/20"><BrainCircuit size={20} className="animate-pulse" /></div>
+                 <div><span className="text-[14px] font-black tracking-tight block">Manus Reasoning</span><span className="text-[9px] font-black uppercase tracking-widest text-blue-500 animate-pulse">Synthesis in progress</span></div>
+               </div>
+               <div className="space-y-5">
+                 {loadingSteps.map((step) => (
+                   <div key={step.id} className={`flex items-center space-x-4 transition-all duration-500 ${step.status === 'pending' ? 'opacity-10' : 'opacity-100'}`}>
+                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${step.status === 'completed' ? 'bg-green-500/10 text-green-500' : step.status === 'running' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 text-white/10'}`}>
+                       {step.status === 'completed' ? <CheckCircle2 size={16} /> : step.status === 'running' ? <Loader2 size={16} className="animate-spin" /> : <Activity size={16} />}
+                     </div>
+                     <span className={`text-[13px] font-bold ${step.status === 'running' ? 'text-white' : 'text-white/40'}`}>{step.label}</span>
+                   </div>
+                 ))}
+               </div>
+             </div>
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Console */}
-      <div className="px-4 pb-10 pt-4 bg-[#080808]">
-        <div className="bg-[#121212] rounded-[2.5rem] p-3 flex flex-col border border-white/10 shadow-[0_-10px_50px_rgba(0,0,0,0.5)]">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage();
-              }
-            }}
-            placeholder="Instruct Manus..."
-            className="w-full bg-transparent text-white text-[16px] outline-none min-h-[50px] p-4 resize-none scrollbar-none font-medium placeholder:text-white/10"
-            rows={1}
-          />
-          <div className="flex items-center justify-between px-3 pb-2 pt-1">
-            <div className="flex space-x-2">
-              <button 
-                onClick={() => setIsSkillsOpen(true)} 
-                className="p-3 text-white/20 hover:text-white hover:bg-white/5 rounded-2xl transition-all"
-              >
-                <Plus size={22} />
-              </button>
-            </div>
-            <button 
-              onClick={() => handleSendMessage()} 
-              disabled={!input.trim() || isLoading} 
-              className={`p-3.5 rounded-2xl transition-all ${input.trim() && !isLoading ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/40 hover:scale-105 active:scale-95' : 'text-white/10'}`}
-            >
-              <ArrowUp size={24} strokeWidth={2.5} />
-            </button>
-          </div>
-        </div>
+      <div className="px-5 mb-2 overflow-x-auto no-scrollbar flex items-center space-x-2">
+        {SUGGESTIONS.map((s, idx) => (
+          <button key={idx} onClick={() => handleSendMessage(s.prompt)} className="shrink-0 flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.08] hover:border-white/10 transition-all active:scale-95">
+            <span className="text-blue-500/60">{s.icon}</span><span className="text-[12px] font-bold tracking-tight whitespace-nowrap opacity-80">{s.label}</span>
+          </button>
+        ))}
       </div>
 
-      {/* Modals */}
-      <SkillsModal isOpen={isSkillsOpen} onClose={() => setIsSkillsOpen(false)} onSkillClick={handleSendMessage} />
-      <ConnectorsModal isOpen={isConnectorsOpen} onClose={() => setIsConnectorsOpen(false)} />
-      <WebsitePreview code={previewCode || ''} isOpen={!!previewCode} onClose={() => setPreviewCode(null)} />
-      <MobileAppPreview 
-        platform={mobileAppPreview?.platform || 'React Native'} 
-        code={mobileAppPreview?.code || ''} 
-        isOpen={!!mobileAppPreview} 
-        onClose={() => setMobileAppPreview(null)} 
-      />
+      <footer className="p-5 glass border-t border-white/[0.04]">
+        <div className="relative group">
+          <button onClick={() => fileInputRef.current?.click()} className="absolute left-2.5 bottom-2.5 p-2.5 text-white/30 hover:text-white transition-all bg-white/5 hover:bg-white/10 rounded-2xl"><FileUp size={20} /></button>
+          <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={`Instruct ${selectedAgent.name}...`} className="w-full bg-[#141414] border border-white/[0.06] rounded-[2rem] pl-16 pr-16 py-4 min-h-[64px] max-h-40 text-[15px] outline-none focus:border-blue-500/40 transition-all resize-none no-scrollbar font-medium" />
+          <button onClick={() => handleSendMessage()} disabled={!input.trim() || isLoading} className={`absolute right-2.5 bottom-2.5 p-2.5 rounded-2xl transition-all ${input.trim() && !isLoading ? 'bg-blue-600 text-white active:scale-90 shadow-[0_0_20px_rgba(37,99,235,0.4)]' : 'bg-white/5 text-white/10'}`}>
+            {isLoading ? <Loader2 size={20} className="animate-spin" /> : <ArrowUp size={20} />}
+          </button>
+        </div>
+      </footer>
+
+      {previewWebCode && <WebsitePreview code={previewWebCode} isOpen={true} onClose={() => setPreviewWebCode(null)} />}
+      {previewMobileData && <MobileAppPreview platform={previewMobileData.platform} code={previewMobileData.code} isOpen={true} onClose={() => setPreviewMobileData(null)} />}
+      {isPublishModalOpen && <PublishModal isOpen={true} onClose={() => setIsPublishModalOpen(false)} appName={previewMobileData?.appName || project?.title} appIcon={previewMobileData?.appIcon} />}
     </div>
   );
 };
